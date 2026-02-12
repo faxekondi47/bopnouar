@@ -150,8 +150,8 @@ end)
 -- Alert frame (non-secure, pure visual - safe to Show/Hide in combat)
 ---------------------------------------------------------------------------
 local alertFrame = CreateFrame("Frame", "BopNouarAlert", UIParent)
-alertFrame:SetSize(400, 100)
-alertFrame:SetPoint("CENTER", 0, 200)
+alertFrame:SetSize(400, 50)
+alertFrame:SetPoint("BOTTOM", bopButton, "TOP", 0, 10)
 alertFrame:SetFrameStrata("DIALOG")
 alertFrame:Hide()
 
@@ -160,13 +160,8 @@ alertBg:SetAllPoints()
 alertBg:SetColorTexture(0.8, 0, 0, 0.7)
 
 local alertText = alertFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
-alertText:SetPoint("CENTER", alertFrame, "CENTER", 0, 15)
+alertText:SetPoint("CENTER", alertFrame, "CENTER", 0, 0)
 alertText:SetTextColor(1, 1, 0, 1)
-
-local alertSubText = alertFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-alertSubText:SetPoint("CENTER", alertFrame, "CENTER", 0, -15)
-alertSubText:SetTextColor(1, 1, 1, 1)
-alertSubText:SetText("Click the button below to BoP!")
 
 ---------------------------------------------------------------------------
 -- Auto-hide timer (alert frame only — button state is buff-driven)
