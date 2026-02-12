@@ -16,11 +16,23 @@ Key design constraint: The BoP button is a `SecureActionButtonTemplate` which me
 - **Visual states** (gray dimmed idle / green pulsing active) to indicate button functionality
 - Button is always visible at alpha=1; never use SetAlpha for visibility toggling
 
-The addon has three logical layers:
+The addon has four components:
 - **SecureActionButton** (`BopNouarButton`) — always-visible macro button, type-attribute-toggled with idle/active visual states, shift+drag movable, executes `/cast [@Twistedrogue] Blessing of Protection`
 - **SecureHandlerStateTemplate** (`BopNouarSecureManager`) — manages combat state transitions for the button's type attribute
 - **Alert frame** (`BopNouarAlert`) — non-secure visual overlay, safe to Show/Hide in combat
 - **Combat log scanner** — listens to `COMBAT_LOG_EVENT_UNFILTERED`, tracks `SPELL_AURA_APPLIED`/`SPELL_AURA_REFRESH`/`SPELL_AURA_REMOVED` for spell IDs 13750 and 13877
+
+## SavedVariables
+
+`BopNouarDB` persists across sessions via the `.toc` `SavedVariables` directive:
+- `BopNouarDB.position` — `{point, relativePoint, x, y}` from `GetPoint(1)`, or `nil` for default
+
+## Key Constants
+
+- Spell IDs: 13750 (Adrenaline Rush), 13877 (Blade Flurry)
+- Sound: 8959 (RaidWarning)
+- Alert duration: 5 seconds
+- Default button position: `CENTER, CENTER, 0, 140`
 
 ## WoW Addon Development Notes
 
