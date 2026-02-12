@@ -1,0 +1,7 @@
+## Interface: 20505
+## Title: BopNouar
+## Notes: Detects Adrenaline Rush or Blade Flurry on Twistedrogue and provides instant BoP button
+## Author: mig
+## Version: 1.0.0
+
+BopNouar.lua
