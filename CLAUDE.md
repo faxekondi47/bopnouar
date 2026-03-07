@@ -19,7 +19,7 @@ Key design constraint: The BoP button is a `SecureActionButtonTemplate` which me
 The addon has four components:
 - **SecureActionButton** (`BopNouarButton`) — always-visible macro button, type-attribute-toggled with idle/active visual states, shift+drag movable, executes `/cast [@Twistedrogue] Blessing of Protection`
 - **SecureHandlerStateTemplate** (`BopNouarSecureManager`) — manages combat state transitions for the button's type attribute
-- **Alert frame** (`BopNouarAlert`) — non-secure visual overlay, safe to Show/Hide in combat
+- **Alert frame** (`BopNouarAlert`) — non-secure visual overlay, safe to Show/Hide in combat; anchored to button (`BOTTOM, bopButton, TOP, 0, 10`) so it moves with it
 - **Combat log scanner** — listens to `COMBAT_LOG_EVENT_UNFILTERED`, tracks `SPELL_AURA_APPLIED`/`SPELL_AURA_REFRESH`/`SPELL_AURA_REMOVED` for spell IDs 13750 and 13877
 
 ## SavedVariables
@@ -36,10 +36,10 @@ The addon has four components:
 
 ## WoW Addon Development Notes
 
-- Lua is the only scripting language; addon code runs in WoW's sandboxed Lua 5.1 environment
-- No build step — the `.toc` and `.lua` files are loaded directly by the game client
+- Initialization happens in `ADDON_LOADED` (restores position, sets idle state); `PLAYER_LOGIN` only prints a status message
 - Test in-game with `/bopnouar test` to trigger the alert UI without a real combat event
 - `/bopnouar reset` resets button position to default (blocked during combat)
+- `/bopnouar` (no args) prints status and available commands
 - Shift+drag to reposition the button; position persists via `SavedVariables: BopNouarDB`
 - `SetAttribute()` is protected in combat — use `SecureHandlerStateTemplate` + `RegisterStateDriver` for combat-time attribute changes
 - Mid-combat buff removal can only update visuals (textures, text color, animations); type attribute cleanup defers to `PLAYER_REGEN_ENABLED`
