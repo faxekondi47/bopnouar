@@ -1,15 +1,22 @@
-local TARGET_NAME = "Twistedrogue"
 local BOP_SPELL = "Blessing of Protection"
 local ALERT_DURATION = 5
 
-local TRACKED_SPELLS = {
-    [13750] = "Adrenaline Rush",
-    [13877] = "Blade Flurry",
+local TARGETS = {
+    ["Twistedrogue"] = {
+        spells = { [13750] = "Adrenaline Rush", [13877] = "Blade Flurry" },
+    },
+    ["Hamhater"] = {
+        spells = { [1719] = "Recklessness", [12292] = "Death Wish" },
+    },
 }
+
+local activeTarget = nil
+local activeSpells = nil
 
 -- Track which buffs are currently active (handles both expiring independently)
 local activeBuffs = {}
 local inCombat = false
+local pendingRescan = false
 
 local DEFAULT_POSITION = { "CENTER", "CENTER", 0, 140 }
 
@@ -23,10 +30,11 @@ local frame = CreateFrame("Frame", "BopNouarFrame", UIParent)
 -- SetPoint(), and SetSize() are ALL protected and will cause "action blocked"
 -- errors if called during combat. SetAlpha() is NOT protected.
 --
--- Strategy: The button is always shown. We use SetAttribute("type", nil) to
--- make it non-functional when idle, and SetAttribute("type", "macro") when
--- active. A SecureHandlerStateTemplate manager ensures the type is set to
--- "macro" on combat entry (since SetAttribute is protected mid-combat).
+-- Strategy: The button is hidden when no target is in group. When a target is
+-- found, we Show() the button and configure its macrotext. We use
+-- SetAttribute("type", nil) to make it non-functional when idle, and
+-- SetAttribute("type", "macro") when active. A SecureHandlerStateTemplate
+-- manager ensures the type is set to "macro" on combat entry.
 -- Visual states (gray idle / green active with pulse) indicate clickability.
 ---------------------------------------------------------------------------
 local bopButton = CreateFrame("Button", "BopNouarButton", UIParent, "SecureActionButtonTemplate")
@@ -34,11 +42,11 @@ bopButton:SetSize(220, 50)
 bopButton:SetPoint("CENTER", 0, 140)
 bopButton:SetFrameStrata("DIALOG")
 bopButton:RegisterForClicks("AnyUp")
-bopButton:SetAttribute("macrotext", "/cast [@" .. TARGET_NAME .. "] " .. BOP_SPELL)
 bopButton:SetAttribute("type", nil)
 bopButton:SetMovable(true)
 bopButton:SetClampedToScreen(true)
 bopButton:RegisterForDrag("LeftButton")
+bopButton:Hide()
 
 local bopBtnBg = bopButton:CreateTexture(nil, "BACKGROUND")
 bopBtnBg:SetAllPoints()
@@ -46,7 +54,7 @@ bopBtnBg:SetColorTexture(0.3, 0.3, 0.3, 0.6)
 
 local bopBtnText = bopButton:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 bopBtnText:SetPoint("CENTER")
-bopBtnText:SetText("BoP " .. TARGET_NAME)
+bopBtnText:SetText("BoP")
 bopBtnText:SetTextColor(0.5, 0.5, 0.5, 1)
 
 ---------------------------------------------------------------------------
@@ -98,6 +106,53 @@ local function SetButtonActive()
     bopButton:SetAlpha(1)
     if not InCombatLockdown() then
         bopButton:SetAttribute("type", "macro")
+    end
+end
+
+---------------------------------------------------------------------------
+-- Roster scanning and target application
+---------------------------------------------------------------------------
+local function ScanRoster()
+    if IsInRaid() then
+        for i = 1, MAX_RAID_MEMBERS do
+            local name = UnitName("raid" .. i)
+            if name and TARGETS[name] then
+                return name
+            end
+        end
+    else
+        for i = 1, MAX_PARTY_MEMBERS do
+            local name = UnitName("party" .. i)
+            if name and TARGETS[name] then
+                return name
+            end
+        end
+    end
+    return nil
+end
+
+local function ApplyTarget(targetName)
+    if targetName == activeTarget then return end
+
+    -- Clear stale buff tracking on target change
+    activeBuffs = {}
+
+    if targetName then
+        activeTarget = targetName
+        activeSpells = TARGETS[targetName].spells
+        bopBtnText:SetText("BoP " .. targetName)
+        if not InCombatLockdown() then
+            bopButton:SetAttribute("macrotext", "/cast [@" .. targetName .. "] " .. BOP_SPELL)
+            bopButton:Show()
+        end
+        SetButtonIdle()
+    else
+        activeTarget = nil
+        activeSpells = nil
+        if not InCombatLockdown() then
+            bopButton:SetAttribute("type", nil)
+            bopButton:Hide()
+        end
     end
 end
 
@@ -182,14 +237,14 @@ end)
 -- Alert functions
 ---------------------------------------------------------------------------
 local function ShowAlert(spellName)
-    alertText:SetText(TARGET_NAME .. " popped " .. spellName .. "!")
+    alertText:SetText(activeTarget .. " popped " .. spellName .. "!")
     alertFrame:Show()
     SetButtonActive()
     PlaySound(8959)
     hideTimer = ALERT_DURATION
     timerActive = true
     DEFAULT_CHAT_FRAME:AddMessage(
-        "|cFFFF0000[BopNouar]|r " .. TARGET_NAME .. " used " .. spellName .. "! BoP NOW!",
+        "|cFFFF0000[BopNouar]|r " .. activeTarget .. " used " .. spellName .. "! BoP NOW!",
         1, 1, 0
     )
 end
@@ -228,6 +283,17 @@ local function ResetPosition()
 end
 
 ---------------------------------------------------------------------------
+-- Spell list helper
+---------------------------------------------------------------------------
+local function GetSpellNames(spells)
+    local names = {}
+    for _, name in pairs(spells) do
+        names[#names + 1] = name
+    end
+    return table.concat(names, " / ")
+end
+
+---------------------------------------------------------------------------
 -- Event handling
 ---------------------------------------------------------------------------
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
@@ -235,6 +301,7 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -244,16 +311,31 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 BopNouarDB = {}
             end
             RestorePosition()
-            SetButtonIdle()
+            ApplyTarget(ScanRoster())
         end
         return
     end
 
     if event == "PLAYER_LOGIN" then
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cFF00FF00[BopNouar]|r Loaded. Watching " .. TARGET_NAME ..
-            " for Adrenaline Rush / Blade Flurry."
-        )
+        if activeTarget then
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cFF00FF00[BopNouar]|r Loaded. Watching " .. activeTarget ..
+                " for " .. GetSpellNames(activeSpells) .. "."
+            )
+        else
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cFF00FF00[BopNouar]|r Loaded. No tracked target in group."
+            )
+        end
+        return
+    end
+
+    if event == "GROUP_ROSTER_UPDATE" then
+        if InCombatLockdown() then
+            pendingRescan = true
+        else
+            ApplyTarget(ScanRoster())
+        end
         return
     end
 
@@ -264,26 +346,34 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
     if event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
-        if next(activeBuffs) then
-            SetButtonActive()
-        else
-            SetButtonIdle()
+        if pendingRescan then
+            pendingRescan = false
+            ApplyTarget(ScanRoster())
+        end
+        if activeTarget then
+            if next(activeBuffs) then
+                SetButtonActive()
+            else
+                SetButtonIdle()
+            end
         end
         return
     end
 
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        if not activeTarget then return end
+
         local _, subevent, _, _, _, _, _, _, destName, _, _, spellId =
             CombatLogGetCurrentEventInfo()
 
         -- Strip realm suffix for cross-realm compatibility ("Name-Realm" -> "Name")
         local nameOnly = destName and destName:match("^([^-]+)") or destName
-        if nameOnly ~= TARGET_NAME then return end
+        if nameOnly ~= activeTarget then return end
 
-        if TRACKED_SPELLS[spellId] then
+        if activeSpells[spellId] then
             if subevent == "SPELL_AURA_APPLIED" or subevent == "SPELL_AURA_REFRESH" then
                 activeBuffs[spellId] = true
-                ShowAlert(TRACKED_SPELLS[spellId])
+                ShowAlert(activeSpells[spellId])
             elseif subevent == "SPELL_AURA_REMOVED" then
                 activeBuffs[spellId] = nil
                 if not next(activeBuffs) then
@@ -313,15 +403,28 @@ SLASH_BOPNOUAR1 = "/bopnouar"
 SlashCmdList["BOPNOUAR"] = function(msg)
     msg = msg and msg:trim():lower() or ""
     if msg == "test" then
-        activeBuffs[13750] = true
-        ShowAlert("Adrenaline Rush")
+        if activeTarget then
+            local spellId, spellName = next(activeSpells)
+            activeBuffs[spellId] = true
+            ShowAlert(spellName)
+        else
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cFFFF0000[BopNouar]|r No tracked target in group. Cannot test."
+            )
+        end
     elseif msg == "reset" then
         ResetPosition()
     else
-        DEFAULT_CHAT_FRAME:AddMessage(
-            "|cFF00FF00[BopNouar]|r Watching for " .. TARGET_NAME ..
-            "'s Adrenaline Rush / Blade Flurry"
-        )
+        if activeTarget then
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cFF00FF00[BopNouar]|r Watching " .. activeTarget ..
+                " for " .. GetSpellNames(activeSpells)
+            )
+        else
+            DEFAULT_CHAT_FRAME:AddMessage(
+                "|cFF00FF00[BopNouar]|r No tracked target in group."
+            )
+        end
         DEFAULT_CHAT_FRAME:AddMessage(
             "|cFF00FF00[BopNouar]|r /bopnouar test - Test the alert"
         )
