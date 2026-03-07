@@ -1,0 +1,63 @@
+name: Release to CurseForge
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" "$GITHUB_REF_NAME")
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" "$PREV_TAG".."$GITHUB_REF_NAME")
+          fi
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package addon
+        run: zip -r BopNouar.zip BopNouar/
+
+      - name: Upload to CurseForge
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          METADATA=$(jq -nc \
+            --arg changelog "$CHANGELOG" \
+            --arg displayName "BopNouar $VERSION" \
+            '{changelog: $changelog, changelogType: "text", displayName: $displayName, gameVersions: [14300], releaseType: "release"}')
+
+          HTTP_STATUS=$(curl -s -o response.txt -w "%{http_code}" \
+            -X POST "https://wow.curseforge.com/api/projects/1460452/upload-file" \
+            -H "X-Api-Token: $CF_API_KEY" \
+            -F "metadata=$METADATA" \
+            -F "file=@BopNouar.zip")
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::CurseForge upload failed with HTTP $HTTP_STATUS"
+            cat response.txt
+            exit 1
+          fi
+
+          echo "Upload successful (HTTP $HTTP_STATUS)"
+          cat response.txt
